@@ -1,0 +1,15 @@
+{
+  "note_id": "VN-2026-011",
+  "job_id": "JOB-2026-042",
+  "client": "Acme Property Management",
+  "location": "123 Main St, Springfield MO — RTU-3",
+  "transcript": "Replaced capacitor on RTU-3. Unit cooling properly. Customer walked the roof with me and signed off. Recommend surge protection next visit.",
+  "language": "en-US",
+  "duration_sec": 28,
+  "audio_sha256": "",
+  "captured_at": "2026-10-29T15:42:00+00:00",
+  "operator": "tech-dan",
+  "reviewed": true,
+  "tags": ["closeout", "hvac"],
+  "notes": "Dictated on-site after completion."
+}

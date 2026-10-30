@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoiceSeal Capture — Operator Pages</title>
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --card: #14181e;
+      --border: #252b34;
+      --text: #e8eaed;
+      --muted: #9aa3ad;
+      --accent: #3dd6c6;
+      --danger: #e85d5d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px 16px 48px;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 8px; }
+    .sub { color: var(--muted); margin-bottom: 24px; font-size: 0.95rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+    input, textarea, select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 1rem;
+      margin-bottom: 12px;
+    }
+    textarea { min-height: 120px; resize: vertical; font-family: inherit; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 520px) { .row { grid-template-columns: 1fr; } }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+    button {
+      border: none;
+      border-radius: 8px;
+      padding: 12px 18px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .btn-primary { background: var(--accent); color: #06221f; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .status {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 10px;
+      min-height: 1.2em;
+    }
+    .status.live { color: var(--accent); }
+    .status.err { color: var(--danger); }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 16px; }
+    code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>VoiceSeal Capture</h1>
+    <p class="sub">Dictate on-site. Review. Download JSON. Seal offline with the CLI.</p>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <label for="job_id">Job ID</label>
+          <input id="job_id" type="text" placeholder="JOB-2026-042" />
+        </div>
+        <div>
+          <label for="note_id">Note ID</label>
+          <input id="note_id" type="text" placeholder="VN-2026-011" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="client">Client</label>
+          <input id="client" type="text" placeholder="Acme Property Management" />
+        </div>
+        <div>
+          <label for="operator">Operator</label>
+          <input id="operator" type="text" placeholder="tech-dan" />
+        </div>
+      </div>
+      <label for="location">Location</label>
+      <input id="location" type="text" placeholder="123 Main St — RTU-3" />
+
+      <label for="transcript">Transcript (editable)</label>
+      <textarea id="transcript" placeholder="Press Start and speak. Edit the text before downloading."></textarea>
+
+      <div class="btn-row">
+        <button type="button" class="btn-primary" id="btnStart">Start listening</button>
+        <button type="button" class="btn-danger" id="btnStop" disabled>Stop</button>
+        <button type="button" class="btn-secondary" id="btnClear">Clear transcript</button>
+        <button type="button" class="btn-secondary" id="btnDownload">Download JSON</button>
+      </div>
+      <div class="status" id="status">Idle. Mic requires a user gesture and a supported browser (Chrome / Edge).</div>
+    </div>
+
+    <p class="hint">
+      After download, seal with:
+      <code>python3 src/voiceseal.py --note your-note.json --out sealed.json</code>
+      then <code>qg verify sealed.json</code>.
+      Core path is local: Web Speech API runs in the browser; no remote model required.
+    </p>
+  </div>
+
+  <script>
+    (function () {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const statusEl = document.getElementById("status");
+      const transcriptEl = document.getElementById("transcript");
+      const btnStart = document.getElementById("btnStart");
+      const btnStop = document.getElementById("btnStop");
+      const btnClear = document.getElementById("btnClear");
+      const btnDownload = document.getElementById("btnDownload");
+
+      let recognition = null;
+      let listening = false;
+      let startedAt = null;
+
+      function setStatus(msg, kind) {
+        statusEl.textContent = msg;
+        statusEl.className = "status" + (kind ? " " + kind : "");
+      }
+
+      if (!SpeechRecognition) {
+        setStatus("Web Speech API not available in this browser.", "err");
+        btnStart.disabled = true;
+        return;
+      }
+
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+
+      recognition.onstart = function () {
+        listening = true;
+        startedAt = Date.now();
+        btnStart.disabled = true;
+        btnStop.disabled = false;
+        setStatus("Listening… speak clearly.", "live");
+      };
+
+      recognition.onend = function () {
+        listening = false;
+        btnStart.disabled = false;
+        btnStop.disabled = true;
+        setStatus("Stopped. Review transcript, then download JSON.");
+      };
+
+      recognition.onerror = function (e) {
+        setStatus("Speech error: " + (e.error || "unknown"), "err");
+        listening = false;
+        btnStart.disabled = false;
+        btnStop.disabled = true;
+      };
+
+      recognition.onresult = function (event) {
+        let finalChunk = "";
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const r = event.results[i];
+          if (r.isFinal) finalChunk += r[0].transcript;
+          else interim += r[0].transcript;
+        }
+        if (finalChunk) {
+          const cur = transcriptEl.value;
+          transcriptEl.value = (cur ? cur.replace(/\s+$/, "") + " " : "") + finalChunk.trim();
+        }
+        if (interim) {
+          setStatus("Listening… " + interim, "live");
+        }
+      };
+
+      btnStart.addEventListener("click", function () {
+        try {
+          recognition.start();
+        } catch (err) {
+          setStatus("Could not start: " + err.message, "err");
+        }
+      });
+
+      btnStop.addEventListener("click", function () {
+        try { recognition.stop(); } catch (_) {}
+      });
+
+      btnClear.addEventListener("click", function () {
+        transcriptEl.value = "";
+        setStatus("Transcript cleared.");
+      });
+
+      btnDownload.addEventListener("click", function () {
+        const transcript = transcriptEl.value.trim();
+        if (!transcript) {
+          setStatus("Nothing to download — add or dictate a transcript first.", "err");
+          return;
+        }
+        const durationSec = startedAt ? Math.max(1, Math.round((Date.now() - startedAt) / 1000)) : null;
+        const noteId = document.getElementById("note_id").value.trim() || ("VN-" + Date.now());
+        const payload = {
+          note_id: noteId,
+          job_id: document.getElementById("job_id").value.trim(),
+          client: document.getElementById("client").value.trim(),
+          location: document.getElementById("location").value.trim(),
+          transcript: transcript,
+          language: "en-US",
+          duration_sec: durationSec,
+          audio_sha256: "",
+          captured_at: new Date().toISOString(),
+          operator: document.getElementById("operator").value.trim() || "field-tech",
+          reviewed: true,
+          tags: [],
+          notes: "Captured via VoiceSeal browser Web Speech."
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = noteId + ".json";
+        a.click();
+        URL.revokeObjectURL(a.href);
+        setStatus("Downloaded " + a.download + " — seal with voiceseal.py");
+      });
+    })();
+  </script>
+</body>
+</html>
